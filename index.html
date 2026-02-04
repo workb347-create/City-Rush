@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>City Rush – Final</title>
+
+<meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="data:application/json,{
+  &quot;name&quot;:&quot;City Rush&quot;,
+  &quot;short_name&quot;:&quot;CityRush&quot;,
+  &quot;display&quot;:&quot;standalone&quot;,
+  &quot;background_color&quot;:&quot;#0f172a&quot;
+}">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka+One&display=swap" rel="stylesheet">
+
+<style>
+body{margin:0;overflow:hidden;background:#0f172a;font-family:'Fredoka One',cursive;touch-action:none}
+#game{position:fixed;inset:0}
+#hud{position:fixed;top:0;width:100%;padding:10px;display:flex;justify-content:space-between;color:#fff}
+.panel{background:rgba(255,255,255,.15);backdrop-filter:blur(8px);padding:6px 12px;border-radius:10px}
+#menu,#over{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.7);color:white}
+button{padding:10px 20px;border-radius:10px;border:none;font-family:inherit;font-size:18px}
+.hidden{display:none}
+</style>
+</head>
+
+<body>
+
+<div id="game"></div>
+
+<div id="hud" class="hidden">
+  <div class="panel">🪙 <span id="coins">0</span></div>
+  <div class="panel">⭐ <span id="score">0</span></div>
+</div>
+
+<div id="menu">
+  <h1>🏙 CITY RUSH</h1>
+  <button onclick="start()">PLAY</button>
+  <button onclick="skin()">SKINS</button>
+  <div id="best"></div>
+</div>
+
+<div id="over" class="hidden">
+  <h2>CRASHED</h2>
+  <div id="final"></div>
+  <button onclick="restart()">RETRY</button>
+</div>
+
+<script>
+/* SAVE */
+let save=JSON.parse(localStorage.getItem("crFinal"))||{
+  coins:0,best:0,skin:0,board:[]
+};
+
+/* CONFIG */
+const CFG={lane:3,spd:14,max:34,grav:45,jump:14};
+
+/* GLOBAL */
+let scene,camera,renderer;
+let p,ghost,obs=[],coins=[],bN=[],bF=[];
+let spd,dist,score,runCoins;
+let lane=0,targetX=0,yv=0,jump=false,play=false;
+let lastO=-30,lastB=-40;
+
+/* INIT */
+init(); loop();
+function init(){
+ scene=new THREE.Scene();
+ scene.background=new THREE.Color(0x87ceeb);
+ camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,.1,300);
+ camera.position.set(0,5,8);
+ renderer=new THREE.WebGLRenderer({antialias:true});
+ renderer.setSize(innerWidth,innerHeight);
+ game.appendChild(renderer.domElement);
+ scene.add(new THREE.HemisphereLight(0xffffff,0x444444,.6));
+ let d=new THREE.DirectionalLight(0xffffff,.8);
+ d.position.set(20,40,20);scene.add(d);
+ ground(); player(); ghostRun();
+ window.onresize=()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)};
+ input();
+ best.textContent="BEST: "+save.best;
+}
+
+/* WORLD */
+function ground(){
+ let g=new THREE.Mesh(new THREE.PlaneGeometry(2000,2000),new THREE.MeshLambertMaterial({color:0x555555}));
+ g.rotation.x=-Math.PI/2;scene.add(g);
+}
+function player(){
+ let colors=[0xff6600,0x00ccff,0x22c55e,0xfacc15];
+ p=new THREE.Mesh(new THREE.BoxGeometry(.8,1.6,.6),new THREE.MeshLambertMaterial({color:colors[save.skin]}));
+ p.position.y=.8;scene.add(p);
+}
+function ghostRun(){
+ ghost=new THREE.Mesh(new THREE.BoxGeometry(.8,1.6,.6),new THREE.MeshLambertMaterial({color:0xffffff,transparent:true,opacity:.3}));
+ ghost.position.y=.8;scene.add(ghost);
+}
+
+/* SPAWN */
+function row(z){
+ let block=Math.floor(Math.random()*3)-1;
+ for(let l=-1;l<=1;l++){
+  if(l===block){
+   let o=new THREE.Mesh(new THREE.BoxGeometry(2.5,1,.6),new THREE.MeshLambertMaterial({color:0xff4444}));
+   o.position.set(l*CFG.lane,.5,z);scene.add(o);obs.push(o);
+  } else if(Math.random()<.5){
+   let c=new THREE.Mesh(new THREE.CylinderGeometry(.4,.4,.15,16),new THREE.MeshLambertMaterial({color:0xffd700}));
+   c.rotation.x=Math.PI/2;c.position.set(l*CFG.lane,1.2,z);scene.add(c);coins.push(c);
+  }
+ }
+}
+function city(z){
+ for(let s of[-1,1]){
+  let h=4+Math.random()*10;
+  let n=new THREE.Mesh(new THREE.BoxGeometry(6,h,6),new THREE.MeshLambertMaterial({color:0x444444}));
+  n.position.set(s*10,h/2,z);scene.add(n);bN.push(n);
+  let fh=6+Math.random()*14;
+  let f=new THREE.Mesh(new THREE.BoxGeometry(10,fh,10),new THREE.MeshLambertMaterial({color:0x333333}));
+  f.position.set(s*18,fh/2,z-10);scene.add(f);bF.push(f);
+ }
+}
+
+/* GAME */
+function start(){
+ menu.classList.add("hidden");
+ hud.classList.remove("hidden");
+ play=true;
+ spd=CFG.spd;dist=score=runCoins=0;
+ lastO=-30;lastB=-40;
+ [...obs,...coins,...bN,...bF].forEach(o=>scene.remove(o));
+ obs=[];coins=[];bN=[];bF=[];
+}
+function restart(){over.classList.add("hidden");start();}
+function end(){
+ play=false;
+ save.coins+=runCoins;
+ save.best=Math.max(save.best,Math.floor(score));
+ save.board.push(Math.floor(score));
+ save.board=save.board.slice(-5);
+ localStorage.setItem("crFinal",JSON.stringify(save));
+ final.textContent="SCORE "+Math.floor(score);
+ over.classList.remove("hidden");
+}
+
+/* LOOP */
+let last=performance.now();
+function loop(t){
+ requestAnimationFrame(loop);
+ let dt=(t-last)/1000;last=t;
+ if(play) update(dt);
+ renderer.render(scene,camera);
+}
+function update(dt){
+ spd=Math.min(CFG.max,spd+dist*.0002);
+ let mv=spd*dt;dist+=mv;score+=mv*.1;
+ while(lastO>-dist-80){row(lastO);lastO-=20}
+ while(lastB>-dist-120){city(lastB);lastB-=25}
+ obs.forEach(o=>o.position.z+=mv);
+ coins.forEach(c=>c.position.z+=mv);
+ bN.forEach(b=>b.position.z+=mv*.9);
+ bF.forEach(b=>b.position.z+=mv*.5);
+ p.position.x=THREE.MathUtils.lerp(p.position.x,targetX,dt*10);
+ if(jump){yv-=CFG.grav*dt;p.position.y+=yv*dt;if(p.position.y<=.8){p.position.y=.8;jump=false}}
+ ghost.position.z-=mv*.98;
+ coll();
+ camera.position.x=p.position.x*.4;
+ camera.lookAt(p.position.x,1,0);
+ scoreEl();
+}
+
+/* COLLISION */
+function coll(){
+ let pb=new THREE.Box3(new THREE.Vector3(p.position.x-.4,p.position.y,-.3),new THREE.Vector3(p.position.x+.4,p.position.y+1.6,.3));
+ obs.forEach(o=>{if(pb.intersectsBox(new THREE.Box3().setFromObject(o)))end()});
+ for(let i=coins.length-1;i>=0;i--){
+  if(coins[i].position.distanceTo(p.position)<1){
+   runCoins++;scene.remove(coins[i]);coins.splice(i,1);
+  }
+ }
+}
+
+/* UI */
+function scoreEl(){
+ coins.textContent=save.coins+runCoins;
+ score.textContent=Math.floor(score);
+}
+
+/* INPUT */
+function input(){
+ addEventListener("keydown",e=>{
+  if(!play)return;
+  if(e.key==="ArrowLeft"&&lane>-1)lane--;
+  if(e.key==="ArrowRight"&&lane<1)lane++;
+  if((e.key==="ArrowUp"||e.key===" ")&&!jump){jump=true;yv=CFG.jump}
+  targetX=lane*CFG.lane;
+ });
+}
+
+/* SKINS */
+function skin(){
+ save.skin=(save.skin+1)%4;
+ localStorage.setItem("crFinal",JSON.stringify(save));
+ location.reload();
+}
+</script>
+
+</body>
+</html>
